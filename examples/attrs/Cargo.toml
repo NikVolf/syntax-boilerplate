@@ -1,0 +1,17 @@
+[package]
+name = "attrs"
+version = "0.1.0"
+authors = ["Nikolay Volf"]
+build = "build.rs"
+
+[dependencies]
+"ethcore-ipc" = { path = "../.." }
+
+[[bin]]
+name = "attrs"
+path = "run.rs"
+
+[build-dependencies]
+"ethcore-ipc" = { path = "../.." }
+
+syntex = "0.30.0"
