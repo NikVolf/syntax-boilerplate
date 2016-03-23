@@ -86,7 +86,6 @@ fn push_invoke_signature (
 	push(Annotatable::Item(input_struct));
 }
 
-
 fn push_invoke_signature_aster (
 	cx: &ExtCtxt,
     builder: &aster::AstBuilder,
@@ -97,13 +96,19 @@ fn push_invoke_signature_aster (
 ) {
 	let name_str = format!("{}_input", implement.ident.name.as_str());
 
-    let struct_ = builder.item().struct_(name_str.as_str())
-        .field("x").ty().isize()
-        .field("y").ty().isize()
-        .build();
+	let inputs = &signature.decl.inputs;
+	if inputs.len() > 0 {
+		let mut tree = builder.item().struct_(name_str.as_str())
+			.field(format!("field_{}", inputs[0].id)).ty().isize();
 
-    push(Annotatable::Item(struct_))
-
+		for arg in inputs.iter().skip(1) {
+			tree = tree.field(format!("field_{}", arg.id)).ty().isize();
+		}
+		push(Annotatable::Item(tree.build()));
+	}
+	else {
+		push(Annotatable::Item(builder.item().struct_(name_str.as_str()).build()));
+	}
 }
 
 //
