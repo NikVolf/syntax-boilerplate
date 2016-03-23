@@ -8,6 +8,8 @@ use syntax::ast::{
 	ImplItem,
 	MethodSig,
 	Arg,
+	Pat,
+	PatKind,
 };
 
 use syntax::ast;
@@ -86,6 +88,13 @@ fn push_invoke_signature (
 	push(Annotatable::Item(input_struct));
 }
 
+fn field_name(builder: &aster::AstBuilder, arg: &Arg) -> ast::Ident {
+	match arg.pat.node {
+		 PatKind::Ident(_, ref ident, _) => builder.id(ident.node),
+		_ => { panic!("unexpected param in interface: {:?}", arg.pat.node) }
+	}
+}
+
 fn push_invoke_signature_aster (
 	cx: &ExtCtxt,
     builder: &aster::AstBuilder,
@@ -99,10 +108,10 @@ fn push_invoke_signature_aster (
 	let inputs = &signature.decl.inputs;
 	if inputs.len() > 0 {
 		let mut tree = builder.item().struct_(name_str.as_str())
-			.field(format!("field_{}", inputs[0].id)).ty().isize();
+			.field(format!("field_{}", field_name(builder, &inputs[0]).name.as_str())).ty().isize();
 
 		for arg in inputs.iter().skip(1) {
-			tree = tree.field(format!("field_{}", arg.id)).ty().isize();
+			tree = tree.field(format!("field_{}", field_name(builder, &arg).name.as_str())).ty().isize();
 		}
 		push(Annotatable::Item(tree.build()));
 	}
