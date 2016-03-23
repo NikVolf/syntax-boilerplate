@@ -107,11 +107,12 @@ fn push_invoke_signature_aster (
 
 	let inputs = &signature.decl.inputs;
 	if inputs.len() > 0 {
+		let arg = &inputs[0];
 		let mut tree = builder.item().struct_(name_str.as_str())
-			.field(format!("field_{}", field_name(builder, &inputs[0]).name.as_str())).ty().isize();
+			.field(format!("field_{}", field_name(builder, &arg).name.as_str())).ty().build(arg.ty.clone());
 
 		for arg in inputs.iter().skip(1) {
-			tree = tree.field(format!("field_{}", field_name(builder, &arg).name.as_str())).ty().isize();
+			tree = tree.field(format!("field_{}", field_name(builder, &arg).name.as_str())).ty().build(arg.ty.clone());
 		}
 		push(Annotatable::Item(tree.build()));
 	}
