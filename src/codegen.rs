@@ -1,9 +1,13 @@
 use aster;
 
 use syntax::ast::{
-    Ident,
-    MetaItem,
-    Item,
+	Ident,
+	MetaItem,
+	Item,
+	ImplItemKind,
+	ImplItem,
+	MethodSig,
+	Arg,
 };
 
 use syntax::ast;
@@ -33,7 +37,7 @@ pub fn expand_ipc_implementation(
 
     let builder = aster::AstBuilder::new().span(span);
 
-    let impl_item = match implement_function(cx, &builder, &item) {
+    let impl_item = match implement_interface(cx, &builder, &item, push) {
         Ok(item) => item,
         Err(Error) => {
             // An error occured, but it should have been reported already.
@@ -44,13 +48,116 @@ pub fn expand_ipc_implementation(
     push(Annotatable::Item(impl_item))
 }
 
-fn implement_function(
+fn implement_param(
+	cx: &ExtCtxt,
+    builder: &aster::AstBuilder,
+    item: &Item,
+	implement: &ImplItem,
+	signature: &MethodSig,
+	arg: &Arg,
+    push: &mut FnMut(Annotatable),
+) {
+
+}
+
+fn push_invoke_signature (
+	cx: &ExtCtxt,
+    builder: &aster::AstBuilder,
+    item: &Item,
+	implement: &ImplItem,
+	signature: &MethodSig,
+    push: &mut FnMut(Annotatable),
+) {
+	let name_str = format!("{}_input", implement.ident.name.as_str());
+	let name = builder.id(builder.name(name_str.as_str()));
+
+	let field_name_str = format!("{}_input", implement.ident.name.as_str());
+	let field_name = builder.id(builder.name(field_name_str.as_str()));
+
+	let ty = quote_ty!(cx, usize);
+
+	let input_struct =
+		quote_item!(cx,
+			struct $name {
+				$field_name: $ty
+			}
+	    ).unwrap();
+
+	push(Annotatable::Item(input_struct));
+}
+
+
+fn push_invoke_signature_aster (
+	cx: &ExtCtxt,
+    builder: &aster::AstBuilder,
+    item: &Item,
+	implement: &ImplItem,
+	signature: &MethodSig,
+    push: &mut FnMut(Annotatable),
+) {
+	let name_str = format!("{}_input", implement.ident.name.as_str());
+
+    let struct_ = builder.item().struct_(name_str.as_str())
+        .field("x").ty().isize()
+        .field("y").ty().isize()
+        .build();
+
+    push(Annotatable::Item(struct_))
+
+}
+
+//
+//
+//fn push_invoke_signature_ast (
+//	cx: &ExtCtxt,
+//    builder: &aster::AstBuilder,
+//    item: &Item,
+//	implement: &ImplItem,
+//	signature: &MethodSig,
+//    push: &mut FnMut(Annotatable),
+//) {
+//	use syntax::ast::*;
+//	use syntax;
+//
+//	let field_name_str = format!("{}_field1", implement.ident.name.as_str());
+//	let field_name = builder.id(builder.name(field_name_str.as_str()));
+//
+//	let struct_field_ty = builder.ty().id("usize");
+//
+//	let struct_field = syntax::codemap::Spanned {
+//		node: StructField {
+//			kind: StructFieldKind::Named(field_name, Visibility::Public),
+//			id: DUMMY_NODE_ID,
+//			ty: struct_field_ty,
+//			attrs: vec![],
+//		},
+//		span: syntax::codemap::DUMMY_SP,
+//	};
+//
+//	let struct_def = syntax::ptr::P(syntax::ast::StructDef {
+//		fields: vec![struct_field],
+//		ctor_id: None,
+//	});
+//
+//	let struct_item = Item {
+//		ident: field_name,
+//		attrs: vec![],
+//		id: DUMMY_NODE_ID,
+//		node: syntax::ast::Item_::ItemStruct(P::from_vec(vec![struct_def])),
+//		span: syntax::codemap::DUMMY_SP
+//	};
+//
+//	push(Annotatable::Item(syntax::ptr::P(struct_item)));
+//}
+
+fn implement_interface(
     cx: &ExtCtxt,
     builder: &aster::AstBuilder,
     item: &Item,
+    push: &mut FnMut(Annotatable),
 ) -> Result<P<ast::Item>, Error> {
-    let generics = match item.node {
-        ast::ItemKind::Impl(_, _, ref generics, _, _, _) => generics,
+    let (generics, impl_items) = match item.node {
+        ast::ItemKind::Impl(_, _, ref generics, _, _, ref impl_items) => (generics, impl_items),
         _ => {
             cx.span_err(
                 item.span,
@@ -71,9 +178,15 @@ fn implement_function(
 
     let where_clause = &impl_generics.where_clause;
 
+	for impl_item in impl_items {
+		if let ImplItemKind::Method(ref signature, ref block) = impl_item.node {
+			push_invoke_signature_aster(cx, builder, item, &impl_item, signature, push);
+		}
+	}
+
     Ok(quote_item!(cx,
         impl $impl_generics ::codegen::interface::IpcInterface<$ty> for $ty $where_clause {
-            fn call(&self)
+			fn dispatch(&self)
             {
             }
         }
