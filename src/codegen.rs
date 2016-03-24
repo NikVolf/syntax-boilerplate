@@ -72,8 +72,8 @@ fn push_invoke_signature_aster (
 			let skip = if first_field_name == "self" { 2 } else { 1 };
 			let name_str = format!("{}_input", implement.ident.name.as_str());
 
-			let mut tree = builder.item().struct_(name_str.as_str())
-				.field(format!("{}", field_name(builder, &inputs[skip-1]).name.as_str())).ty().build(inputs[skip-1].ty.clone());
+			let mut tree = builder.item().attr().word("derive(Serialize, Deserialize)").struct_(name_str.as_str())
+				.field(format!("{}", field_name(builder, &inputs[skip-1]).name.as_str	())).ty().build(inputs[skip-1].ty.clone());
 			for arg in inputs.iter().skip(skip) {
 				tree = tree.field(format!("{}", field_name(builder, &arg).name.as_str())).ty().build(arg.ty.clone());
 			}
@@ -86,32 +86,10 @@ fn push_invoke_signature_aster (
 		None
 	};
 
-//	if inputs.len() > 0 {
-//		let mut skip = 1;
-//		let mut arg = &inputs[0];
-//		if field_name(builder, &arg).name.as_str() == "self" && inputs.len() > 1 {
-//			skip = 2;
-//			arg = &inputs[1];
-//		}
-//		else {
-//			push(Annotatable::Item(builder.item().struct_(name_str.as_str()).build()));
-//		}
-//		let mut tree = builder.item().struct_(name_str.as_str())
-//			.field(format!("{}", field_name(builder, &arg).name.as_str())).ty().build(arg.ty.clone());
-//
-//		for arg in inputs.iter().skip(skip) {
-//			tree = tree.field(format!("{}", field_name(builder, &arg).name.as_str())).ty().build(arg.ty.clone());
-//		}
-//		push(Annotatable::Item(tree.build()));
-//	}
-//	else {
-//		push(Annotatable::Item(builder.item().struct_(name_str.as_str()).build()));
-//	}
-
 	let return_type_name = match signature.decl.output {
 		FunctionRetTy::Ty(ref ty) => {
 			let name_str = format!("{}_output", implement.ident.name.as_str());
-			let tree = builder.item().struct_(name_str.as_str())
+			let tree = builder.item().attr().word("derive(Serialize, Deserialize)").struct_(name_str.as_str())
 				.field(format!("payload")).ty().build(ty.clone());
 			push(Annotatable::Item(tree.build()));
 			Some(name_str.to_owned())
@@ -166,12 +144,29 @@ fn implement_interface(
 
     Ok(quote_item!(cx,
         impl $impl_generics ::codegen::interface::IpcInterface<$ty> for $ty $where_clause {
-			fn dispatch(&self, read: &mut ::std::io::Read) -> Vec<u8>
+			fn dispatch<R>(&self, r: &mut R) -> Vec<u8>
+				where R: ::std::io::Read
             {
+				let mut method_num = vec![0u8;2];
+				match r.read(&mut method_num) {
+					Ok(size) if size == 0 => return vec![],
+					Err(e) => { panic!("ipc read error, aborting"); }
+					_ => {}
+				}
+				match method_num[0] + method_num[1]*256 {
+					0 => {
+						let input: new_input = ::bincode::serde::deserialize_from(r, ::bincode::SizeLimit::Infinite).expect("ipc deserialization error, aborting");
+						::bincode::serde::serialize(&new_output { payload: self.new(input.a, input.b) }, ::bincode::SizeLimit::Infinite).unwrap()
+					}
+					_ => vec![]
+				}
             }
-			fn invoke(&self, method_num: u16, write: &mut ::std::io::Write) -> Vec<u8>
+			fn invoke<W>(&self, method_num: u16, params: &Option<Vec<u8>>, w: &mut W) -> Vec<u8>
+				where W: ::std::io::Write
 			{
+				vec![]
 			}
+
         }
     ).unwrap())
 }

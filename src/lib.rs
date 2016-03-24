@@ -6,6 +6,7 @@
 
 extern crate aster;
 extern crate quasi;
+extern crate bincode;
 
 #[cfg(feature = "with-syntex")]
 extern crate syntex;
