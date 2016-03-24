@@ -115,7 +115,7 @@ struct Dispatch {
 	return_type_name: Option<String>,
 }
 
-fn implement_dispatch_arm(
+fn implement_dispatch_arm_invoke(
 	cx: &ExtCtxt,
     builder: &aster::AstBuilder,
 	dispatch: &Dispatch,
@@ -123,22 +123,22 @@ fn implement_dispatch_arm(
 {
 	let deserialize_expr = quote_expr!(cx, ::bincode::serde::deserialize_from(r, ::bincode::SizeLimit::Infinite).expect("ipc deserialization error, aborting"));
 	let input_type_id = builder.id(dispatch.input_type_name.clone().unwrap().as_str());
-	let output_type_id = builder.id(dispatch.return_type_name.clone().unwrap().as_str());
 	let function_name = builder.id(dispatch.function_name.as_str());
+	let output_type_id = builder.id(dispatch.return_type_name.clone().unwrap().as_str());
 
 	let input_args_exprs = dispatch.input_arg_names.iter().map(|ref arg_name| {
 		let arg_ident = builder.id(arg_name);
 		quote_expr!(cx, input. $arg_ident)
 	}).collect::<Vec<P<ast::Expr>>>();
 
-
 	//	This is the expanded version of this:
 	//
 	//	let invoke_serialize_stmt = quote_stmt!(cx, {
 	//		::bincode::serde::serialize(& $output_type_id { payload: self. $function_name ($hand_param_a, $hand_param_b) }, ::bincode::SizeLimit::Infinite).unwrap()
-	//	});
+	//  });
 	//
-	//	But the above does not allow comma-separated expressions
+	// But the above does not allow comma-separated expressions for arbitrary number
+	// of parameters ...$hand_param_a, $hand_param_b, ... $hand_param_n
 	let invoke_serialize_stmt = {
 		let ext_cx = &*cx;
 		::quasi::parse_stmt_panic(&mut ::syntax::parse::new_parser_from_tts(
@@ -192,7 +192,14 @@ fn implement_dispatch_arm(
 		let input: $input_type_id = $deserialize_expr;
 		$invoke_serialize_stmt
 	})
+}
 
+fn implement_dispatch_arm(cx: &ExtCtxt, builder: &aster::AstBuilder, index: u32, dispatch: &Dispatch)
+	-> ast::Arm
+{
+	let index_ident = builder.id(format!("{}", index).as_str());
+	let invoke_expr = implement_dispatch_arm_invoke(cx, builder, dispatch);
+	quote_arm!(cx, $index_ident => { $invoke_expr } )
 }
 
 fn implement_interface(
@@ -201,27 +208,27 @@ fn implement_interface(
     item: &Item,
     push: &mut FnMut(Annotatable),
 ) -> Result<P<ast::Item>, Error> {
-    let (generics, impl_items) = match item.node {
-        ast::ItemKind::Impl(_, _, ref generics, _, _, ref impl_items) => (generics, impl_items),
-        _ => {
-            cx.span_err(
-                item.span,
-                "`#[derive(Ipc)]` may only be applied to struct implementations");
-            return Err(Error);
-        }
-    };
+	let (generics, impl_items) = match item.node {
+		ast::ItemKind::Impl(_, _, ref generics, _, _, ref impl_items) => (generics, impl_items),
+		_ => {
+			cx.span_err(
+				item.span,
+				"`#[derive(Ipc)]` may only be applied to item implementations");
+			return Err(Error);
+		}
+	};
 
-    let impl_generics = builder.from_generics(generics.clone())
-        .add_ty_param_bound(
-            builder.path().global().ids(&["ethcore_ipc"]).build()
-        )
-        .build();
+	let impl_generics = builder.from_generics(generics.clone())
+		.add_ty_param_bound(
+			builder.path().global().ids(&["ethcore_ipc"]).build()
+		)
+		.build();
 
-    let ty = builder.ty().path()
-        .segment(item.ident).with_generics(impl_generics.clone()).build()
-        .build();
+	let ty = builder.ty().path()
+		.segment(item.ident).with_generics(impl_generics.clone()).build()
+		.build();
 
-    let where_clause = &impl_generics.where_clause;
+	let where_clause = &impl_generics.where_clause;
 
 	let mut dispatch_table = Vec::new();
 	for impl_item in impl_items {
@@ -229,24 +236,23 @@ fn implement_interface(
 			dispatch_table.push(push_invoke_signature_aster(cx, builder, item, &impl_item, signature, push));
 		}
 	}
+	let mut index = -1;
+	let dispatch_arms: Vec<_> = dispatch_table.iter()
+		.map(|dispatch| { index = index + 1; implement_dispatch_arm(cx, builder, index as u32, dispatch) }).collect();
 
-	let dispatch_expr_1 = implement_dispatch_arm(cx, builder, &dispatch_table[1]);
-
-    Ok(quote_item!(cx,
-        impl $impl_generics ::codegen::interface::IpcInterface<$ty> for $ty $where_clause {
+	Ok(quote_item!(cx,
+		impl $impl_generics ::codegen::interface::IpcInterface<$ty> for $ty $where_clause {
 			fn dispatch<R>(&self, r: &mut R) -> Vec<u8>
 				where R: ::std::io::Read
-            {
+			{
 				let mut method_num = vec![0u8;2];
 				match r.read(&mut method_num) {
-					Ok(size) if size == 0 => return vec![],
+					Ok(size) if size == 0 => vec![],
 					Err(e) => { panic!("ipc read error, aborting"); }
 					_ => {}
 				}
 				match method_num[0] + method_num[1]*256 {
-					0 => {
-						$dispatch_expr_1
-					}
+					$dispatch_arms
 					_ => vec![]
 				}
 			}
@@ -257,5 +263,5 @@ fn implement_interface(
 			}
 
 		}
-    ).unwrap())
+	).unwrap())
 }
