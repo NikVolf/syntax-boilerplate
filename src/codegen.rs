@@ -10,6 +10,7 @@ use syntax::ast::{
 	Arg,
 	Pat,
 	PatKind,
+	FunctionRetTy,
 };
 
 use syntax::ast;
@@ -30,9 +31,7 @@ pub fn expand_ipc_implementation(
     let item = match *annotatable {
         Annotatable::Item(ref item) => item,
         _ => {
-            cx.span_err(
-                meta_item.span,
-                "`#[derive(Ipc)]` may only be applied to struct implementations");
+            cx.span_err(meta_item.span, "`#[derive(Ipc)]` may only be applied to struct implementations");
             return;
         }
     };
@@ -41,51 +40,10 @@ pub fn expand_ipc_implementation(
 
     let impl_item = match implement_interface(cx, &builder, &item, push) {
         Ok(item) => item,
-        Err(Error) => {
-            // An error occured, but it should have been reported already.
-            return;
-        }
+        Err(Error) => { return; }
     };
 
     push(Annotatable::Item(impl_item))
-}
-
-fn implement_param(
-	cx: &ExtCtxt,
-    builder: &aster::AstBuilder,
-    item: &Item,
-	implement: &ImplItem,
-	signature: &MethodSig,
-	arg: &Arg,
-    push: &mut FnMut(Annotatable),
-) {
-
-}
-
-fn push_invoke_signature (
-	cx: &ExtCtxt,
-    builder: &aster::AstBuilder,
-    item: &Item,
-	implement: &ImplItem,
-	signature: &MethodSig,
-    push: &mut FnMut(Annotatable),
-) {
-	let name_str = format!("{}_input", implement.ident.name.as_str());
-	let name = builder.id(builder.name(name_str.as_str()));
-
-	let field_name_str = format!("{}_input", implement.ident.name.as_str());
-	let field_name = builder.id(builder.name(field_name_str.as_str()));
-
-	let ty = quote_ty!(cx, usize);
-
-	let input_struct =
-		quote_item!(cx,
-			struct $name {
-				$field_name: $ty
-			}
-	    ).unwrap();
-
-	push(Annotatable::Item(input_struct));
 }
 
 fn field_name(builder: &aster::AstBuilder, arg: &Arg) -> ast::Ident {
@@ -102,68 +60,75 @@ fn push_invoke_signature_aster (
 	implement: &ImplItem,
 	signature: &MethodSig,
     push: &mut FnMut(Annotatable),
-) {
-	let name_str = format!("{}_input", implement.ident.name.as_str());
+) -> Dispatch {
+
+	let mut dispath = Dispatch { input_type_name: None, return_type_name: None };
 
 	let inputs = &signature.decl.inputs;
-	if inputs.len() > 0 {
-		let arg = &inputs[0];
-		let mut tree = builder.item().struct_(name_str.as_str())
-			.field(format!("field_{}", field_name(builder, &arg).name.as_str())).ty().build(arg.ty.clone());
+	let input_type_name = if inputs.len() > 0 {
+		let first_field_name = field_name(builder, &inputs[0]).name.as_str();
+		if  first_field_name == "self" && inputs.len() == 1 { None }
+		else {
+			let skip = if first_field_name == "self" { 2 } else { 1 };
+			let name_str = format!("{}_input", implement.ident.name.as_str());
 
-		for arg in inputs.iter().skip(1) {
-			tree = tree.field(format!("field_{}", field_name(builder, &arg).name.as_str())).ty().build(arg.ty.clone());
+			let mut tree = builder.item().struct_(name_str.as_str())
+				.field(format!("{}", field_name(builder, &inputs[skip-1]).name.as_str())).ty().build(inputs[skip-1].ty.clone());
+			for arg in inputs.iter().skip(skip) {
+				tree = tree.field(format!("{}", field_name(builder, &arg).name.as_str())).ty().build(arg.ty.clone());
+			}
+
+			push(Annotatable::Item(tree.build()));
+			Some(name_str.to_owned())
 		}
-		push(Annotatable::Item(tree.build()));
 	}
 	else {
-		push(Annotatable::Item(builder.item().struct_(name_str.as_str()).build()));
+		None
+	};
+
+//	if inputs.len() > 0 {
+//		let mut skip = 1;
+//		let mut arg = &inputs[0];
+//		if field_name(builder, &arg).name.as_str() == "self" && inputs.len() > 1 {
+//			skip = 2;
+//			arg = &inputs[1];
+//		}
+//		else {
+//			push(Annotatable::Item(builder.item().struct_(name_str.as_str()).build()));
+//		}
+//		let mut tree = builder.item().struct_(name_str.as_str())
+//			.field(format!("{}", field_name(builder, &arg).name.as_str())).ty().build(arg.ty.clone());
+//
+//		for arg in inputs.iter().skip(skip) {
+//			tree = tree.field(format!("{}", field_name(builder, &arg).name.as_str())).ty().build(arg.ty.clone());
+//		}
+//		push(Annotatable::Item(tree.build()));
+//	}
+//	else {
+//		push(Annotatable::Item(builder.item().struct_(name_str.as_str()).build()));
+//	}
+
+	let return_type_name = match signature.decl.output {
+		FunctionRetTy::Ty(ref ty) => {
+			let name_str = format!("{}_output", implement.ident.name.as_str());
+			let tree = builder.item().struct_(name_str.as_str())
+				.field(format!("payload")).ty().build(ty.clone());
+			push(Annotatable::Item(tree.build()));
+			Some(name_str.to_owned())
+		}
+		_ => None
+	};
+
+	Dispatch {
+		input_type_name: input_type_name,
+		return_type_name: return_type_name,
 	}
 }
 
-//
-//
-//fn push_invoke_signature_ast (
-//	cx: &ExtCtxt,
-//    builder: &aster::AstBuilder,
-//    item: &Item,
-//	implement: &ImplItem,
-//	signature: &MethodSig,
-//    push: &mut FnMut(Annotatable),
-//) {
-//	use syntax::ast::*;
-//	use syntax;
-//
-//	let field_name_str = format!("{}_field1", implement.ident.name.as_str());
-//	let field_name = builder.id(builder.name(field_name_str.as_str()));
-//
-//	let struct_field_ty = builder.ty().id("usize");
-//
-//	let struct_field = syntax::codemap::Spanned {
-//		node: StructField {
-//			kind: StructFieldKind::Named(field_name, Visibility::Public),
-//			id: DUMMY_NODE_ID,
-//			ty: struct_field_ty,
-//			attrs: vec![],
-//		},
-//		span: syntax::codemap::DUMMY_SP,
-//	};
-//
-//	let struct_def = syntax::ptr::P(syntax::ast::StructDef {
-//		fields: vec![struct_field],
-//		ctor_id: None,
-//	});
-//
-//	let struct_item = Item {
-//		ident: field_name,
-//		attrs: vec![],
-//		id: DUMMY_NODE_ID,
-//		node: syntax::ast::Item_::ItemStruct(P::from_vec(vec![struct_def])),
-//		span: syntax::codemap::DUMMY_SP
-//	};
-//
-//	push(Annotatable::Item(syntax::ptr::P(struct_item)));
-//}
+struct Dispatch {
+	input_type_name: Option<String>,
+	return_type_name: Option<String>,
+}
 
 fn implement_interface(
     cx: &ExtCtxt,
@@ -201,9 +166,12 @@ fn implement_interface(
 
     Ok(quote_item!(cx,
         impl $impl_generics ::codegen::interface::IpcInterface<$ty> for $ty $where_clause {
-			fn dispatch(&self)
+			fn dispatch(&self, read: &mut ::std::io::Read) -> Vec<u8>
             {
             }
+			fn invoke(&self, method_num: u16, write: &mut ::std::io::Write) -> Vec<u8>
+			{
+			}
         }
     ).unwrap())
 }
