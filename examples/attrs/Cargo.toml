@@ -6,6 +6,8 @@ build = "build.rs"
 
 [dependencies]
 "ethcore-ipc" = { path = "../.." }
+bincode = "*"
+serde = "0.7.0"
 
 [[bin]]
 name = "attrs"
@@ -13,5 +15,5 @@ path = "run.rs"
 
 [build-dependencies]
 "ethcore-ipc" = { path = "../.." }
-
 syntex = "0.30.0"
+serde_codegen = "0.7.0"
